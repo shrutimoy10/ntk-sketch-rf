@@ -2,7 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 import torch
-assert torch.__version__.split('+')[0] >= '1.8.0'
+assert torch.__version__.split('+')[0] >= '1.10.0'
 import torch.fft as fft
 import torch.nn as nn
 from scipy.special import erf
@@ -164,7 +164,7 @@ class NtkFeatureMapOps(nn.Module):
         elif sketch == 'countsketch':
             sketch_func = CountSketch2
         elif sketch == 'exact':
-            sketch_funct = TensorProduct
+            sketch_func = TensorProduct
         else:
             raise NotImplementedError
 
@@ -176,11 +176,22 @@ class NtkFeatureMapOps(nn.Module):
 
         self.arccos0 = [AcosFeatureMap(input_dim, m0, False, dev)]
         self.arccos1 = [AcosFeatureMap(input_dim, m1, do_leverage, dev)]
-        self.sketches = [sketch_func(input_dim, m0, ms, dev)]
+        
+        #added to handle the init of TensorProduct
+        if sketch=='exact':
+            self.sketches = [sketch_func(input_dim, m0, ms)]
+        else:
+            self.sketches = [sketch_func(input_dim, m0, ms, dev)]
+
         for _ in range(num_layers - 1):
             self.arccos0.append(AcosFeatureMap(m1, m0, False, dev))
             self.arccos1.append(AcosFeatureMap(m1, m1, do_leverage, dev))
-            self.sketches.append(sketch_func((ms + m1), m0, ms, dev))
+            
+            #added to handle the init of TensorProduct
+            if sketch=='exact':
+                self.sketches.append(sketch_func(input_dim, m0, ms))
+            else:
+                self.sketches.append(sketch_func((ms + m1), m0, ms, dev))
 
     def forward(self, z_nngp_orig, z_ntk_orig=None):
         z_nngp = z_nngp_orig
@@ -198,5 +209,6 @@ class NtkFeatureMapOps(nn.Module):
                 z_nngp = self.arccos1[i](z_nngp, order=1)
                 mu = self.sketches[i](z_ntk, tmp)
                 z_ntk = torch.cat((z_nngp, mu), axis=1)
-
+        print("m0 : {}, m1 : {}, ms : {}".format(self.m0, self.m1, self.ms))
+        print("z_ntk shape : {}".format(z_ntk.shape))
         return z_nngp, z_ntk

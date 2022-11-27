@@ -1,4 +1,5 @@
 import os
+import time # added
 import numpy as np
 import argparse
 import torch
@@ -7,7 +8,8 @@ from sklearn.metrics import mean_squared_error
 
 from datasets import get_uci_dataset
 from ntk_sketch import TensorSketch, OblvFeat, get_poly_approx_ntk
-from ntk_random_features import NtkFeatureMapOps
+from ntk_random_features import NtkFeatureMapOps #import for original results
+# from learn_ntk_random_features import NtkFeatureMapOps # import for optimized rf results
 
 
 def solve_reg(x_tr, y_tr, x_te, y_te, lam, y_std=1.0):
@@ -64,6 +66,7 @@ def main():
         X_orig = np.delete(X_orig, np.std(X_orig, axis=0).tolist().index(0.0), axis=1)
 
     n_tot, d = X_orig.shape
+    print("X shape : {}".format(X_orig.shape))
 
     mse_all = []
     for i, (tr_fold, te_fold) in enumerate(KFold(n_splits=4).split(np.arange(n_tot))):
@@ -95,9 +98,19 @@ def main():
             cs_dim = args.cs_dim
             a1_dim = args.feat_dim - cs_dim
 
-            ntkrf = NtkFeatureMapOps(args.num_layers, d, m1=a1_dim, m0=a1_dim, ms=cs_dim, do_leverage=True)
+            rf_time_0 = time.time()
+            # original call
+            # ntkrf = NtkFeatureMapOps(args.num_layers, d, m1=a1_dim, m0=a1_dim, ms=cs_dim, do_leverage=True)
+            ntkrf = NtkFeatureMapOps(args.num_layers, d, m1=a1_dim, m0=a1_dim, ms=cs_dim, sketch='exact', do_leverage=True)
+            '''
+            passing the  train labels for optimizing the random features
+            '''
+            # ntkrf = NtkFeatureMapOps(args.num_layers, y, d, m1=a1_dim, m0=a1_dim, ms=cs_dim, do_leverage=True)
             _, Z = ntkrf(X)
             Z = Z.type(torch.DoubleTensor)
+            rf_time_1 = time.time()
+            total_rf_time = rf_time_1 - rf_time_0
+
 
         indices = np.random.permutation(len(tr_fold))
         tr_train_fold = indices[:1000]
@@ -108,11 +121,16 @@ def main():
         res = hyperparams_search(LAMBDA_LIST, Z[tr_fold], y[tr_fold], tr_train_fold, tr_valid_fold, y_std)
         best_lam = res['best_lam']
 
+        mse_time_0 = time.time()        
         mse, _ = solve_reg(Z[tr_fold], y[tr_fold], Z[te_fold], y[te_fold], best_lam * len(tr_fold), y_std)
+        mse_time_1 = time.time()
         mse_all.append(mse)
+        mse_time_total = mse_time_1 - mse_time_0
 
     mse = np.mean(mse_all)
     print(f"mse: {mse}")
+    total_time = np.mean(total_rf_time + mse_time_total)
+    print(f"time: {total_time}")
 
 
 if __name__ == "__main__":
